@@ -19,9 +19,26 @@ using namespace std;
 int cmin = 130, cmax = 1000; // maxi/mini longeur contour
 int niter = 3; // Number of erosion/dilatation
 
+struct track {
+  Point p; // Position
+  Point v; // Speed
+  Point a; // Acceleration
+  // ??
+};
+vector<track> Tracks;
+int nt = 0;
+
+struct object {
+  Point p; // Position
+  // ??
+};
+
+vector<track> Objects;
+int no = 0;
+
 int main(int argc, char* argv[]) {
 
-  int x,y,np;
+  int x,y;
   // Execution time
   double start,stop, dt;
 
@@ -77,12 +94,14 @@ int main(int argc, char* argv[]) {
 
     // Contour
     vector<vector<Point>> contours;
-    vector<Point> Centers;
-    np = 0;
     findContours(decision,contours,RETR_EXTERNAL,CHAIN_APPROX_NONE);
 
     // Elimination des contours trop long/court
     vector<vector<Point>>::iterator itc = contours.begin();
+
+    // Elimination des anciens objets
+    Objects.clear();
+    no = 0;
 
     while (itc != contours.end()) {
 
@@ -92,22 +111,26 @@ int main(int argc, char* argv[]) {
       else {
         // Centre de gravite
         Moments mom = moments(*itc);
-        x = mom.m10/mom.m00;
-        y = mom.m01/mom.m00;
-        circle(display, Point(x,y), 2, Scalar(0,0,255), 2);
-        Centers.push_back(Point(x,y));
-        np++;
+
+        Objects.push_back({
+          Point(mom.m10/mom.m00,mom.m01/mom.m00), // Position
+        });
+
+        no++;
+
         ++itc;
       }
     }
     // drawContours(display, contours, -1, Scalar(0,0,255), 2);
 
-    // Applying gaussian over centers
-    for (int p = 0; p < np; p++) {
-      // Centers.at(p).x / Centers.at(p).y
+    // Data association
+    for (int obj = 0; obj < no; obj++) {
 
+      circle(display, Objects[obj].p, 2, Scalar(0,0,255), 2);
 
+      for (int trck = 0; trck < nt; trck++) {
 
+      }
     }
 
 
