@@ -13,12 +13,15 @@
 using namespace cv;
 using namespace std;
 
+#define WIDTH 640
+#define HEIGHT 480
+
 int cmin = 130, cmax = 1000; // maxi/mini longeur contour
 int niter = 3; // Number of erosion/dilatation
 
 int main(int argc, char* argv[]) {
 
-  int x,y;
+  int x,y,np;
   // Execution time
   double start,stop, dt;
 
@@ -30,12 +33,12 @@ int main(int argc, char* argv[]) {
 
   // Create capture
   VideoCapture capture("video.mp4");
-  capture.set(CAP_PROP_FRAME_WIDTH,  320);
-  capture.set(CAP_PROP_FRAME_HEIGHT, 240);
+  capture.set(CAP_PROP_FRAME_WIDTH,  WIDTH);
+  capture.set(CAP_PROP_FRAME_HEIGHT, HEIGHT);
 
   // Create window
   namedWindow("Raw", WINDOW_NORMAL);
-  resizeWindow("Raw", 640*1.5, 320*1.5);
+  resizeWindow("Raw", WIDTH, HEIGHT);
 
   if (!capture.isOpened()){
     cerr << "Unable to open file" << endl;
@@ -43,6 +46,7 @@ int main(int argc, char* argv[]) {
   }
 
   Mat raw, filtered, decision, display;
+  Mat obj = Mat::zeros(Size(WIDTH, HEIGHT), CV_64FC1);
   while (true) {
 
     // Frame rate
@@ -74,6 +78,7 @@ int main(int argc, char* argv[]) {
     // Contour
     vector<vector<Point>> contours;
     vector<Point> Centers;
+    np = 0;
     findContours(decision,contours,RETR_EXTERNAL,CHAIN_APPROX_NONE);
 
     // Elimination des contours trop long/court
@@ -89,12 +94,24 @@ int main(int argc, char* argv[]) {
         Moments mom = moments(*itc);
         x = mom.m10/mom.m00;
         y = mom.m01/mom.m00;
-        circle(display, Point(x,y), 2, Scalar(0,255,0), 2);
+        circle(display, Point(x,y), 2, Scalar(0,0,255), 2);
         Centers.push_back(Point(x,y));
+        np++;
         ++itc;
       }
     }
     // drawContours(display, contours, -1, Scalar(0,0,255), 2);
+
+    // Applying gaussian over centers
+    for (int p = 0; p < np; p++) {
+      // Centers.at(p).x / Centers.at(p).y
+
+
+
+    }
+
+
+
 
     // Trackbars
     createTrackbar("Niter", "Raw", &niter, 10);
