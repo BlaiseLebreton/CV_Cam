@@ -1,22 +1,26 @@
 #include <iostream>
 #include <sstream>
 #include <time.h>
+#include <math.h>
+
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/video.hpp>
+#include <opencv2/features2d.hpp>
 
 using namespace cv;
 using namespace std;
 
+int cmin = 130, cmax = 1000; // maxi/mini longeur contour
+int niter = 3; // Number of erosion/dilatation
+
 int main(int argc, char* argv[]) {
 
-	// Execution time
-	double start,stop, dt;
-
-  // Number of erosion/dilatation
-  int niter = 3;
+  int x,y;
+  // Execution time
+  double start,stop, dt;
 
   // Create Background Subtractor objects
   Ptr<BackgroundSubtractor> pBackSub;
@@ -38,22 +42,26 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  Mat frame, decision;
+  Mat raw, filtered, decision, display;
   while (true) {
 
     // Frame rate
     start = getTickCount();
 
-    capture >> frame;
-    if (frame.empty()) {
+    capture >> raw;
+    if (raw.empty()) {
       break;
     }
 
+    // Creating display image
+    cvtColor(raw, display, COLOR_BGR2GRAY);
+    cvtColor(display, display, COLOR_GRAY2BGR);
+
     // Apply blur
-    GaussianBlur(frame, frame, Size(11, 11), 0, 0);
+    GaussianBlur(raw, filtered, Size(11, 11), 0, 0);
 
     // Update the background model
-    pBackSub->apply(frame, decision);
+    pBackSub->apply(filtered, decision);
 
     // Erosion / Dilatation
     for (int i=0; i<niter; i++) {
@@ -63,17 +71,44 @@ int main(int argc, char* argv[]) {
       erode( decision,decision,getStructuringElement(MORPH_ELLIPSE,Size(5,5)));
     }
 
+    // Contour
+    vector<vector<Point>> contours;
+    vector<Point> Centers;
+    findContours(decision,contours,RETR_EXTERNAL,CHAIN_APPROX_NONE);
+
+    // Elimination des contours trop long/court
+    vector<vector<Point>>::iterator itc = contours.begin();
+
+    while (itc != contours.end()) {
+
+      if (itc->size() < cmin || itc->size() > cmax) {
+        itc = contours.erase(itc);
+      }
+      else {
+        // Centre de gravite
+        Moments mom = moments(*itc);
+        x = mom.m10/mom.m00;
+        y = mom.m01/mom.m00;
+        circle(display, Point(x,y), 2, Scalar(0,255,0), 2);
+        Centers.push_back(Point(x,y));
+        ++itc;
+      }
+    }
+    // drawContours(display, contours, -1, Scalar(0,0,255), 2);
+
     // Trackbars
     createTrackbar("Niter", "Raw", &niter, 10);
+    createTrackbar("Min Size", "Raw", &cmin, 1000);
+    createTrackbar("Max Size", "Raw", &cmax, 1000);
 
 
     // Frame rate
     stop = getTickCount();
     dt = ((stop - start)/ getTickFrequency());
-    putText(decision, to_string((int)(1/dt)) + "Hz", Point(30,30), FONT_HERSHEY_DUPLEX, 1.0, Scalar(255,255,255), 2);
+    putText(display, to_string((int)(1/dt)) + "Hz", Point(30,30), FONT_HERSHEY_DUPLEX, 1.0, Scalar(255,255,255), 2);
 
     // Display result
-    imshow("Raw", decision);
+    imshow("Raw", display);
 
     int keyboard = waitKey(30);
     if (keyboard == 'q' || keyboard == 27) {
