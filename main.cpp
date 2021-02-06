@@ -1,48 +1,61 @@
-#include "opencv2/opencv.hpp"
 #include <iostream>
+#include <sstream>
+#include <time.h>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/video.hpp>
 
-using namespace std;
 using namespace cv;
+using namespace std;
 
-int seuil = 25;
-int niter = 3;
-int cmin = 0, cmax = 10000; // maxi/mini longeur contour
+int main(int argc, char* argv[]) {
 
-int main(){
-  VideoCapture cap("video.mp4");
+	// Execution time
+	double start,stop, dt;
 
-  if(!cap.isOpened()){
-    cout << "Error opening video stream or file" << endl;
-    return -1;
-  }
-  cap.set(CAP_PROP_FRAME_WIDTH,  320);
-  cap.set(CAP_PROP_FRAME_HEIGHT, 240);
+  // Number of erosion/dilatation
+  int niter = 3;
 
+  // Create Background Subtractor objects
+  Ptr<BackgroundSubtractor> pBackSub;
+  // (history, varThreshold, detectShadows);
+  pBackSub = createBackgroundSubtractorMOG2(500, 16, false);
+  // pBackSub = createBackgroundSubtractorKNN(500, 16, false);
+
+  // Create capture
+  VideoCapture capture("video.mp4");
+  capture.set(CAP_PROP_FRAME_WIDTH,  320);
+  capture.set(CAP_PROP_FRAME_HEIGHT, 240);
+
+  // Create window
   namedWindow("Raw", WINDOW_NORMAL);
-  resizeWindow("Raw", 640*2, 320*2);
+  resizeWindow("Raw", 640*1.5, 320*1.5);
 
-  Mat new_frameRGB;
-  Mat new_frame;
-  Mat old_frame;
-  Mat decision;
-  Mat display;
+  if (!capture.isOpened()){
+    cerr << "Unable to open file" << endl;
+    return 0;
+  }
 
-  while(1) {
-    // printf("Loop\n");
-    cap >> new_frameRGB;
-    new_frame = new_frameRGB;
-    cvtColor(new_frame, new_frame, COLOR_BGR2GRAY);
+  Mat frame, decision;
+  while (true) {
 
+    // Frame rate
+    start = getTickCount();
 
-    if (new_frame.empty()) {
+    capture >> frame;
+    if (frame.empty()) {
       break;
     }
-    if (old_frame.empty()) {
-      old_frame = new_frame;
-    }
 
-    decision = (abs(new_frame - old_frame) > seuil)*255;
+    // Apply blur
+    GaussianBlur(frame, frame, Size(11, 11), 0, 0);
 
+    // Update the background model
+    pBackSub->apply(frame, decision);
+
+    // Erosion / Dilatation
     for (int i=0; i<niter; i++) {
       dilate(decision,decision,getStructuringElement(MORPH_ELLIPSE,Size(5,5)));
     }
@@ -50,53 +63,22 @@ int main(){
       erode( decision,decision,getStructuringElement(MORPH_ELLIPSE,Size(5,5)));
     }
 
-    // Contour
-    vector<vector<Point> > contours;
-    findContours(decision,contours,RETR_EXTERNAL,CHAIN_APPROX_NONE);
-
-    // Elimination des contours trop long/court
-    vector<vector<Point> >::iterator itc = contours.begin();
-    vector<vector<Point> >::iterator i_m = itc;
-    int max = 0;
-
-    // cvtColor(decision, decision, COLOR_GRAY2BGR);
-  	while (itc != contours.end()) {
-
-  		if (itc->size() < cmin || itc->size() > cmax)
-  			itc = contours.erase(itc);
-  		else
-      {
-        if (itc->size() > max){
-          max = itc->size();
-          i_m = itc;
-        }
-        Moments mom = moments(*itc);
-
-        // Centre de gravite
-        circle(new_frameRGB, Point(mom.m10/mom.m00,mom.m01/mom.m00), 2, Scalar(0,255,0), 2);
-        ++itc;
-      }
-  	}
-    drawContours(new_frameRGB, contours, -1, Scalar(0,0,255), 2);
-
-    createTrackbar("Seuil", "Raw", &seuil, 255);
+    // Trackbars
     createTrackbar("Niter", "Raw", &niter, 10);
-    createTrackbar("Min Size", "Raw", &cmin, 10000);
-    createTrackbar("Max Size", "Raw", &cmax, 10000);
-    // hconcat(new_frame, decision, display);
-    imshow("Raw", new_frameRGB);
-    // imshow("Raw", decision);
 
-    old_frame = new_frame;
 
-    char c=(char)waitKey(25);
-    if(c==27) {
+    // Frame rate
+    stop = getTickCount();
+    dt = ((stop - start)/ getTickFrequency());
+    putText(decision, to_string((int)(1/dt)) + "Hz", Point(30,30), FONT_HERSHEY_DUPLEX, 1.0, Scalar(255,255,255), 2);
+
+    // Display result
+    imshow("Raw", decision);
+
+    int keyboard = waitKey(30);
+    if (keyboard == 'q' || keyboard == 27) {
       break;
     }
   }
-
-  cap.release();
-  destroyAllWindows();
-
   return 0;
 }
