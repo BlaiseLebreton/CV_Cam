@@ -27,25 +27,26 @@ int sky    = 110; // Sky start
 
 struct track {
   Point2f p; // Position
+  Rect rect; // Bounding box
   Point2f v; // Speed
   Point2f a; // Acceleration
   Point2f op; // Old position
   Point2f ov; // Old position
   int iter=0; // Number of time track has been updated
-  // ??
+  bool found=true; // Number of time track has been updated
+  vector<Point2f> hp; // History of positions
+  Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255)); // Color
 };
 vector<track> Tracks;
 
 struct object {
   Point2f p; // Position
-  int width;
-  int height;
   Rect rect;
 };
 
 vector<object> Objects;
 
-// static void arrowedLine(InputOutputArray img, Point pt1, Point pt2, const Scalar& color, int thickness=1, int line_type=8, int shift=0, double tipLength=0.1);
+float Distance(object Obj, track Trck);
 
 
 int main(int argc, char* argv[]) {
@@ -96,7 +97,7 @@ int main(int argc, char* argv[]) {
     cvtColor(display, display, COLOR_GRAY2BGR);
 
     // Apply blur
-    GaussianBlur(crop, filtered, Size(31, 31), 0, 0);
+    GaussianBlur(crop, filtered, Size(11, 11), 0, 0);
 
     // Update the background model
     pBackSub->apply(filtered, decision);
@@ -125,30 +126,27 @@ int main(int argc, char* argv[]) {
         boundRect[i] = boundingRect( contours[i] );
         Objects.push_back({
           (boundRect[i].tl() + boundRect[i].br())/2.0, // Position
-          boundRect[i].width,
-          boundRect[i].height,
           boundRect[i]
         });
       }
     }
 
-    // drawContours(display, contours, -1, Scalar(0,0,255), 2);
-
     // Predict tracks
     for (int trck = 0; trck < Tracks.size(); trck++) {
+      Tracks[trck].iter -= 1;
+      Tracks[trck].found = false;
       Tracks[trck].op = Tracks[trck].p;
       Tracks[trck].ov = Tracks[trck].v;
 
       Tracks[trck].v = Tracks[trck].v + 1/2*Tracks[trck].a;
       Tracks[trck].p = Tracks[trck].p + Tracks[trck].v;
-      circle(display, Tracks[trck].p, 2, Scalar(255,0,0), 2);
+      circle(display, Tracks[trck].p, 2, Scalar(0,255,0), 2);
     }
 
     // Data association
     for (int obj = 0; obj < Objects.size(); obj++) {
 
       // Draw objects
-      // circle(display, Objects[obj].p, 2, Scalar(255,0,0), 2);
       rectangle(display, Objects[obj].rect.tl(), Objects[obj].rect.br(), Scalar(0,0,255), 2 );
 
       float mindist = 1000000;
@@ -156,8 +154,7 @@ int main(int argc, char* argv[]) {
       float dist;
       for (int trck = 0; trck < Tracks.size(); trck++) {
         // Measure similarity
-        Point2f dx = Objects[obj].p - Tracks[trck].p;
-        dist = sqrt(abs(dx.x*dx.x + dx.y*dx.y));
+        dist = Distance(Objects[obj], Tracks[trck]);
 
         if (dist < mindist) {
           mindist = dist;
@@ -166,28 +163,33 @@ int main(int argc, char* argv[]) {
       }
 
       // Create new track
-      printf("Obj : %d | Track : %d | dist = %f\n", obj,mintrck,mindist);
       if ((mindist > distth) || (mintrck == -1)) {
         printf("Creating new track for %d\n",obj);
         Tracks.push_back({
           Objects[obj].p, // Position
-          Point2f(0,0), // Speed
-          Point2f(0,0), // Acceleration
+          Objects[obj].rect
         });
+
+        if (Tracks.size() > 5) {
+          break;
+        }
 
       }
       else {
         // Update track with object
-        printf("Found track %d for %d\n",mintrck,obj);
-        Tracks[mintrck].iter++;
+        printf("Obj : %d = Track : %d\n", obj,mintrck);
+        Tracks[mintrck].iter += 2;
 
+        // Calculate speed and acceleration
         Point2f dx = Objects[obj].p - Tracks[mintrck].op;
         Point2f dv = dx;
         Point2f da = (dv - Tracks[mintrck].ov);
 
-        Tracks[mintrck].p = Objects[obj].p; // Filtre bayésien ?
+        // Update position, speed and acceleration
+        Tracks[mintrck].p = Objects[obj].p;
         Tracks[mintrck].v = dv;
         Tracks[mintrck].a = da;
+        Tracks[mintrck].found = true;
 
       }
     }
@@ -195,10 +197,18 @@ int main(int argc, char* argv[]) {
       printf("\n");
     }
 
+    // Resample tracks
+    for (int trck = 0; trck < Tracks.size(); trck++) {
+      if (Tracks[trck].iter <= 100 && !Tracks[trck].found) {
+        // Tracks.erase(trck);
+      }
+    }
+
     // Draw tracks
     for (int trck = 0; trck < Tracks.size(); trck++) {
-      circle(display, Tracks[trck].p, 2, Scalar(0,255,0), 2);
-      arrowedLine(display, Tracks[trck].p, Tracks[trck].p + Tracks[trck].v*10, Scalar(0,255,0), 1, 8, 0, 0.1);
+      circle(display, Tracks[trck].p, 2, Tracks[trck].color, 2);
+      arrowedLine(display, Tracks[trck].p, Tracks[trck].p + Tracks[trck].v*10, Tracks[trck].color, 1, 8, 0, 0.1);
+      putText(display, to_string(trck) + " " + to_string(Tracks[trck].iter), Tracks[trck].p, FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
     }
 
     // Trackbars
@@ -206,7 +216,6 @@ int main(int argc, char* argv[]) {
     createTrackbar("Sky", "Raw", &sky, raw.rows);
     createTrackbar("Min Size", "Raw", &cmin, 1000);
     createTrackbar("Max Size", "Raw", &cmax, 1000);
-
 
     // Frame rate
     stop = getTickCount();
@@ -216,7 +225,8 @@ int main(int argc, char* argv[]) {
     // Display result
     imshow("Raw", display);
 
-    int keyboard = waitKey(1);
+    // Break if q or esc is pressed
+    int keyboard = waitKey(30);
     if (keyboard == 'q' || keyboard == 27) {
       break;
     }
@@ -224,16 +234,18 @@ int main(int argc, char* argv[]) {
   return 0;
 }
 
-//
-// static void arrowedLine(InputOutputArray img, Point pt1, Point pt2, const Scalar& color, int thickness=1, int line_type=8, int shift=0, double tipLength=0.1)
-// {
-//     const double tipSize = norm(pt1-pt2)*tipLength; // Factor to normalize the size of the tip depending on the length of the arrow
-//     line(img, pt1, pt2, color, thickness, line_type, shift);
-//     const double angle = atan2( (double) pt1.y - pt2.y, (double) pt1.x - pt2.x );
-//     Point p(cvRound(pt2.x + tipSize * cos(angle + CV_PI / 4)),
-//     cvRound(pt2.y + tipSize * sin(angle + CV_PI / 4)));
-//     line(img, p, pt2, color, thickness, line_type, shift);
-//     p.x = cvRound(pt2.x + tipSize * cos(angle - CV_PI / 4));
-//     p.y = cvRound(pt2.y + tipSize * sin(angle - CV_PI / 4));
-//     line(img, p, pt2, color, thickness, line_type, shift);
-// }
+// Distance function
+float a1 = 1.0;
+float a2 = 0.25;
+float a3 = 0.25;
+float Distance(object Obj, track Trck) {
+  float d = 0;
+  Point2f dcr = Obj.p - Trck.p;
+  // Point2f dtl = Obj.rect.tl() - Trck.rect.tl();
+  // Point2f dbr = Obj.rect.br() - Trck.rect.br();
+  d += a1*sqrt(abs(dcr.x*dcr.x + dcr.y*dcr.y));
+  // d += a2*sqrt(abs(dtl.x*dtl.x + dtl.y*dtl.y));
+  // d += a3*sqrt(abs(dbr.x*dbr.x + dbr.y*dbr.y));
+
+  return d;
+}
