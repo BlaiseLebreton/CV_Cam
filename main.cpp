@@ -20,8 +20,9 @@ using namespace std;
 RNG rng(12345);
 
 
-int cmin = 50, cmax = 1000; // maxi/mini longeur contour
-int niter  = 3; // Number of erosion/dilatation
+int cmin = 65, cmax = 1000; // maxi/mini longeur contour
+int meanmin = 70;
+int niter  = 2; // Number of erosion/dilatation
 float distth = 20; // Distance threshold for new track
 int sky    = 110; // Sky start
 
@@ -35,7 +36,6 @@ struct track {
   int kfound=0; // Number of time track has been updated
   int klost=0; // Number of time track has been updated
   bool found=true; // Number of time track has been updated
-  vector<Point2f> hp; // History of positions
   Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255)); // Color
 };
 vector<track> Tracks;
@@ -58,21 +58,16 @@ int main(int argc, char* argv[]) {
 
   // Create Background Subtractor objects
   Ptr<BackgroundSubtractor> pBackSub;
-  // (history, varThreshold, detectShadows);
   pBackSub = createBackgroundSubtractorMOG2(500, 16, false);
-  // pBackSub = createBackgroundSubtractorKNN(500, 16, false);
 
   // Create capture
-  VideoCapture capture("video2.mp4");
+  VideoCapture capture("video.mp4");
   capture.set(CAP_PROP_FRAME_WIDTH,  WIDTH);
   capture.set(CAP_PROP_FRAME_HEIGHT, HEIGHT);
 
   // Create window
   namedWindow("Raw", WINDOW_KEEPRATIO);
   resizeWindow("Raw", WIDTH, HEIGHT);
-  // Create window
-  // namedWindow("Decision", WINDOW_KEEPRATIO);
-  // resizeWindow("Decision", WIDTH, HEIGHT);
 
   if (!capture.isOpened()){
     cerr << "Unable to open file" << endl;
@@ -92,6 +87,7 @@ int main(int argc, char* argv[]) {
 
     // Resize
     resize(raw, raw, Size(WIDTH, HEIGHT));
+
     // Crop
     Rect roi = Rect(0, sky, raw.cols, raw.rows-sky-1);
     crop = raw(roi);
@@ -105,32 +101,34 @@ int main(int argc, char* argv[]) {
 
     // Update the background model
     pBackSub->apply(filtered, decision);
-    // cvtColor(decision, display, COLOR_GRAY2BGR);
-
     // Erosion / Dilatation
     for (int i=0; i<niter; i++) {
-      dilate(decision,decision,getStructuringElement(MORPH_ELLIPSE,Size(5,5)));
+      dilate(decision,decision,getStructuringElement(MORPH_ELLIPSE,Size(3,3)));
     }
     for (int i=0; i<niter; i++) {
-      erode( decision,decision,getStructuringElement(MORPH_ELLIPSE,Size(5,5)));
+      erode( decision,decision,getStructuringElement(MORPH_ELLIPSE,Size(3,3)));
     }
 
-    // Contour
+    // // Show decision
+    // cvtColor(decision, display, COLOR_GRAY2BGR);
+
     vector<vector<Point>> contours;
     findContours(decision,contours,RETR_EXTERNAL,CHAIN_APPROX_NONE);
-
-    // Elimination des contours trop long/court
-    vector<Rect> boundRect(contours.size());
 
     // Elimination des anciens objets
     Objects.clear();
 
+    // Elimination des contours trop long/court
+    Rect boundRect;
     for( size_t i = 0; i < contours.size(); i++ ) {
-      if ((contours[i].size() > cmin) && (contours[i].size() < cmax)) {
-        boundRect[i] = boundingRect( contours[i] );
+      boundRect = boundingRect( contours[i] );
+      int m = (int)sum(mean(decision(boundRect)))[0];
+
+      if ((contours[i].size() > cmin) && (contours[i].size() < cmax) && (m > meanmin)) {
+        drawContours(display, contours, i, Scalar(255,255,0), 1);
         Objects.push_back({
-          (boundRect[i].tl() + boundRect[i].br())/2.0, // Position
-          boundRect[i]
+          (boundRect.tl() + boundRect.br())/2.0, // Position
+          boundRect
         });
       }
     }
@@ -143,14 +141,14 @@ int main(int argc, char* argv[]) {
 
       Tracks[trck].v = Tracks[trck].v + 1/2*Tracks[trck].a;
       Tracks[trck].p.push_back(Tracks[trck].p.back() + Tracks[trck].v);
-      circle(display, Tracks[trck].p.back(), 2, Scalar(0,255,0), 2);
+      circle(display, Tracks[trck].p.back(), 1, Scalar(0,255,0), 2);
     }
 
     // Data association
     for (int obj = 0; obj < Objects.size(); obj++) {
 
       // Draw objects
-      rectangle(display, Objects[obj].rect.tl(), Objects[obj].rect.br(), Scalar(0,0,255), 2 );
+      rectangle(display, Objects[obj].rect.tl(), Objects[obj].rect.br(), Scalar(0,0,255), 1);
 
       float mindist = 1000000;
       int mintrck = -1;
@@ -218,13 +216,13 @@ int main(int argc, char* argv[]) {
 
     // Draw tracks
     for (int trck = 0; trck < Tracks.size(); trck++) {
-      circle     (display, Tracks[trck].p.back(), 2, Tracks[trck].color, 2);
-      arrowedLine(display, Tracks[trck].p.back(), Tracks[trck].p.back() + Tracks[trck].v*10, Tracks[trck].color, 1, 8, 0, 0.1);
-      putText    (display, to_string(trck),                Tracks[trck].p.back() + Point2f(0,0),  FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
-      putText    (display, to_string(Tracks[trck].kfound), Tracks[trck].p.back() + Point2f(0,10), FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
-      putText    (display, to_string(Tracks[trck].klost),  Tracks[trck].p.back() + Point2f(0,20), FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
+      circle     (display, Tracks[trck].p.back(), 1, Tracks[trck].color, 2);
+      // arrowedLine(display, Tracks[trck].p.back(), Tracks[trck].p.back() + Tracks[trck].v*10, Tracks[trck].color, 1, 8, 0, 0.1);
+      // putText    (display, to_string(trck),                Tracks[trck].p.back() + Point2f(0,0),  FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 1);
+      // putText    (display, to_string(Tracks[trck].kfound), Tracks[trck].p.back() + Point2f(0,10), FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 1);
+      // putText    (display, to_string(Tracks[trck].klost),  Tracks[trck].p.back() + Point2f(0,20), FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 1);
       for (int ip = 1; ip < Tracks[trck].p.size(); ip++) {
-        line(display, Tracks[trck].p[ip-1], Tracks[trck].p[ip], Tracks[trck].color);
+        line(display, Tracks[trck].p[ip-1], Tracks[trck].p[ip], Tracks[trck].color, 2);
       }
     }
 
@@ -233,6 +231,7 @@ int main(int argc, char* argv[]) {
     createTrackbar("Sky", "Raw", &sky, raw.rows);
     createTrackbar("Min Size", "Raw", &cmin, 1000);
     createTrackbar("Max Size", "Raw", &cmax, 1000);
+    createTrackbar("Min Mean", "Raw", &meanmin, 1000);
 
     // Frame rate
     stop = getTickCount();
