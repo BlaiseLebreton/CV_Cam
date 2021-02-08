@@ -26,13 +26,14 @@ float distth = 20; // Distance threshold for new track
 int sky    = 110; // Sky start
 
 struct track {
-  Point2f p; // Position
+  vector<Point2f> p; // Position
   Rect rect; // Bounding box
   Point2f v; // Speed
   Point2f a; // Acceleration
   Point2f op; // Old position
   Point2f ov; // Old position
-  int iter=0; // Number of time track has been updated
+  int kfound=0; // Number of time track has been updated
+  int klost=0; // Number of time track has been updated
   bool found=true; // Number of time track has been updated
   vector<Point2f> hp; // History of positions
   Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255)); // Color
@@ -68,7 +69,10 @@ int main(int argc, char* argv[]) {
 
   // Create window
   namedWindow("Raw", WINDOW_KEEPRATIO);
-  // resizeWindow("Raw", WIDTH, HEIGHT);
+  resizeWindow("Raw", WIDTH, HEIGHT);
+  // Create window
+  // namedWindow("Decision", WINDOW_KEEPRATIO);
+  // resizeWindow("Decision", WIDTH, HEIGHT);
 
   if (!capture.isOpened()){
     cerr << "Unable to open file" << endl;
@@ -101,6 +105,7 @@ int main(int argc, char* argv[]) {
 
     // Update the background model
     pBackSub->apply(filtered, decision);
+    // cvtColor(decision, display, COLOR_GRAY2BGR);
 
     // Erosion / Dilatation
     for (int i=0; i<niter; i++) {
@@ -117,7 +122,6 @@ int main(int argc, char* argv[]) {
     // Elimination des contours trop long/court
     vector<Rect> boundRect(contours.size());
 
-
     // Elimination des anciens objets
     Objects.clear();
 
@@ -133,14 +137,13 @@ int main(int argc, char* argv[]) {
 
     // Predict tracks
     for (int trck = 0; trck < Tracks.size(); trck++) {
-      Tracks[trck].iter -= 1;
       Tracks[trck].found = false;
-      Tracks[trck].op = Tracks[trck].p;
+      // Tracks[trck].op = Tracks[trck].p;
       Tracks[trck].ov = Tracks[trck].v;
 
       Tracks[trck].v = Tracks[trck].v + 1/2*Tracks[trck].a;
-      Tracks[trck].p = Tracks[trck].p + Tracks[trck].v;
-      circle(display, Tracks[trck].p, 2, Scalar(0,255,0), 2);
+      Tracks[trck].p.push_back(Tracks[trck].p.back() + Tracks[trck].v);
+      circle(display, Tracks[trck].p.back(), 2, Scalar(0,255,0), 2);
     }
 
     // Data association
@@ -164,11 +167,10 @@ int main(int argc, char* argv[]) {
 
       // Create new track
       if ((mindist > distth) || (mintrck == -1)) {
-        printf("Creating new track for %d\n",obj);
-        Tracks.push_back({
-          Objects[obj].p, // Position
-          Objects[obj].rect
-        });
+        track NewElem;
+        NewElem.p.push_back(Objects[obj].p);
+        NewElem.rect = Objects[obj].rect;
+        Tracks.push_back(NewElem);
 
         if (Tracks.size() > 5) {
           break;
@@ -177,38 +179,53 @@ int main(int argc, char* argv[]) {
       }
       else {
         // Update track with object
-        printf("Obj : %d = Track : %d\n", obj,mintrck);
-        Tracks[mintrck].iter += 2;
+        Tracks[mintrck].kfound++;
+        Tracks[mintrck].found = true;
 
         // Calculate speed and acceleration
-        Point2f dx = Objects[obj].p - Tracks[mintrck].op;
+        Point2f dx = Objects[obj].p - Tracks[mintrck].p.end()[-2];
         Point2f dv = dx;
         Point2f da = (dv - Tracks[mintrck].ov);
 
         // Update position, speed and acceleration
-        Tracks[mintrck].p = Objects[obj].p;
+        Tracks[mintrck].p.back() = Objects[obj].p;
         Tracks[mintrck].v = dv;
         Tracks[mintrck].a = da;
-        Tracks[mintrck].found = true;
 
       }
     }
-    if (Objects.size() > 0) {
-      printf("\n");
-    }
 
-    // Resample tracks
+    // Update counts
     for (int trck = 0; trck < Tracks.size(); trck++) {
-      if (Tracks[trck].iter <= 100 && !Tracks[trck].found) {
-        // Tracks.erase(trck);
+      if (!Tracks[trck].found) {
+        Tracks[trck].klost++;
+        Tracks[trck].kfound = 0;   // Pas sur
+      }
+      else {
+        Tracks[trck].klost = 0;
+        Tracks[trck].kfound++;   // Pas sur
       }
     }
+
+    // Resample
+    vector<track> Tracks2;
+    for (int trck = 0; trck < Tracks.size(); trck++) {
+      if (Tracks[trck].klost <= 10 || Tracks[trck].found) {
+        Tracks2.push_back(Tracks[trck]);
+      }
+    }
+    Tracks = Tracks2;
 
     // Draw tracks
     for (int trck = 0; trck < Tracks.size(); trck++) {
-      circle(display, Tracks[trck].p, 2, Tracks[trck].color, 2);
-      arrowedLine(display, Tracks[trck].p, Tracks[trck].p + Tracks[trck].v*10, Tracks[trck].color, 1, 8, 0, 0.1);
-      putText(display, to_string(trck) + " " + to_string(Tracks[trck].iter), Tracks[trck].p, FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
+      circle     (display, Tracks[trck].p.back(), 2, Tracks[trck].color, 2);
+      arrowedLine(display, Tracks[trck].p.back(), Tracks[trck].p.back() + Tracks[trck].v*10, Tracks[trck].color, 1, 8, 0, 0.1);
+      putText    (display, to_string(trck),                Tracks[trck].p.back() + Point2f(0,0),  FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
+      putText    (display, to_string(Tracks[trck].kfound), Tracks[trck].p.back() + Point2f(0,10), FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
+      putText    (display, to_string(Tracks[trck].klost),  Tracks[trck].p.back() + Point2f(0,20), FONT_HERSHEY_DUPLEX, 0.5, Scalar(255,255,255), 2);
+      for (int ip = 1; ip < Tracks[trck].p.size(); ip++) {
+        line(display, Tracks[trck].p[ip-1], Tracks[trck].p[ip], Tracks[trck].color);
+      }
     }
 
     // Trackbars
@@ -224,6 +241,7 @@ int main(int argc, char* argv[]) {
 
     // Display result
     imshow("Raw", display);
+    // imshow("Decision", decision);
 
     // Break if q or esc is pressed
     int keyboard = waitKey(30);
@@ -240,7 +258,7 @@ float a2 = 0.25;
 float a3 = 0.25;
 float Distance(object Obj, track Trck) {
   float d = 0;
-  Point2f dcr = Obj.p - Trck.p;
+  Point2f dcr = Obj.p - Trck.p.back();
   // Point2f dtl = Obj.rect.tl() - Trck.rect.tl();
   // Point2f dbr = Obj.rect.br() - Trck.rect.br();
   d += a1*sqrt(abs(dcr.x*dcr.x + dcr.y*dcr.y));
